@@ -13,7 +13,8 @@ class Path(object):
             return "/path/to/datasets/coco/"
         elif dataset == "bdd":
             # return './bdd100k'
-            return "C:/datasets/bdd100k/bdd100k"
+            # return "C:/datasets/bdd100k/bdd100k"
+            return "/nasa/datasets/public_datasets/bdd100k/bdd100k"
         elif dataset == "nice":
             return "./bdd_nice"
         else:
