@@ -84,7 +84,7 @@ class Trainer(object):
 
         # Define network
         # Todo: add option for other networks
-        model = DeepLab(
+        model = LaneDeepLab(
             args=self.args, num_classes=self.nclass, freeze_bn=args.freeze_bn
         )
         """
@@ -212,12 +212,14 @@ class Trainer(object):
         num_img_tr = len(self.train_loader)
         for i, sample in enumerate(tbar):
             image, target = sample["image"], sample["label"]
+            lanes = sample["lanes"]
             if self.args.cuda:
                 image, target = image.cuda(), target.cuda()
+                lanes = lanes.cuda().unsqueeze(1)
             self.scheduler(self.optimizer, i, epoch, self.best_pred)
             self.optimizer.zero_grad()
             output = self.model(image)
-            loss = self.criterion(output, target)
+            loss = self.criterion(output, (target, lanes))
             loss.backward()
             self.optimizer.step()
             train_loss += loss.item()
@@ -259,14 +261,16 @@ class Trainer(object):
         test_loss = 0.0
         for i, sample in enumerate(tbar):
             image, target = sample["image"], sample["label"]
+            lanes = sample["lanes"]
             if self.args.cuda:
                 image, target = image.cuda(), target.cuda()
+                lanes = lanes.cuda().unsqueeze(1)
             with torch.no_grad():
                 output = self.model(image)
-            loss = self.criterion(output, target)
+            loss = self.criterion(output, (target, lanes))
             test_loss += loss.item()
             tbar.set_description("Test loss: %.3f" % (test_loss / (i + 1)))
-            pred = output.data.cpu().numpy()
+            pred = output[:, :-1, :, :].data.cpu().numpy()
             target = target.cpu().numpy()
             pred = np.argmax(pred, axis=1)
             # Add batch sample into evaluator
@@ -320,8 +324,8 @@ def main():
     parser.add_argument(
         "--dataset",
         type=str,
-        default="pascal",
-        # choices=['pascal', 'coco', 'cityscapes', 'bdd'],
+        default="bdd",
+        choices=["pascal", "coco", "cityscapes", "bdd"],
         help="dataset name (default: pascal)",
     )
     parser.add_argument(
@@ -543,7 +547,7 @@ def main():
             "pascal": 0.007,
             "pascal_toy": 0.007,
             "bdd_toy": 0.001,
-            "bdd": 0.01,
+            "bdd": 0.001,
         }
         args.lr = lrs[args.dataset.lower()] / 16 * args.batch_size
 

@@ -261,7 +261,7 @@ class Rescale(object):
         if "lanes" in sample:
             lanes = sample["lanes"]
             lanes = lanes.resize(shape, Image.NEAREST)
-            return_dict.update({"lanes", lanes})
+            return_dict.update({"lanes": lanes})
         return return_dict
 
 

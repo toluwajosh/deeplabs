@@ -55,9 +55,8 @@ class SegmentationLosses(object):
 
     def CrossEntropyLaneLoss(self, logit, target):
         n, c, h, w = logit.size()
-
-        celoss = self.celoss(logit[:, 0:-1, :, :], target[0].long())
-        laneloss = self.mse(logit[:, -1:, :, :], target[1].long())
+        celoss = self.celoss(logit[:, :-1, :, :], target[0].long())
+        laneloss = self.mse(logit[:, -1:, :, :], target[1])
 
         if self.batch_average:
             celoss /= n

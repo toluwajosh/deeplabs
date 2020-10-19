@@ -181,7 +181,7 @@ class DeepLab(nn.Module):
 
 class LaneDeepLab(DeepLab):
     def __init__(self, args, num_classes=21, freeze_bn=False, abn=False, deep_dec=True):
-        super(LaneDeepLab, self).__init__()
+        super(DeepLab, self).__init__()
         self.args = args
         self.abn = abn
         self.deep_dec = deep_dec  # if True, it deeplabv3+, otherwise, deeplabv3
