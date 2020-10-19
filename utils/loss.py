@@ -1,27 +1,48 @@
 import torch
 import torch.nn as nn
 
+
 class SegmentationLosses(object):
-    def __init__(self, weight=None, size_average=True, batch_average=True, ignore_index=255, cuda=False):
+    def __init__(
+        self,
+        weight=None,
+        size_average=True,
+        batch_average=True,
+        ignore_index=255,
+        cuda=False,
+    ):
         self.ignore_index = ignore_index
         self.weight = weight
         self.size_average = size_average
         self.batch_average = batch_average
         self.cuda = cuda
+        self.mse = nn.MSELoss()
 
-    def build_loss(self, mode='ce'):
+    def build_loss(self, mode="ce"):
         """Choices: ['ce' or 'focal']"""
-        if mode == 'ce':
+        if mode == "ce":
             return self.CrossEntropyLoss
-        elif mode == 'focal':
+        elif mode == "focal":
             return self.FocalLoss
+        elif mode == "ce+lane":
+            self.celoss = nn.CrossEntropyLoss(
+                weight=self.weight,
+                ignore_index=self.ignore_index,
+                size_average=self.size_average,
+            )
+            if self.cuda:
+                self.celoss = self.celoss.cuda()
+            return self.CrossEntropyLaneLoss
         else:
             raise NotImplementedError
 
     def CrossEntropyLoss(self, logit, target):
         n, c, h, w = logit.size()
-        criterion = nn.CrossEntropyLoss(weight=self.weight, ignore_index=self.ignore_index,
-                                        size_average=self.size_average)
+        criterion = nn.CrossEntropyLoss(
+            weight=self.weight,
+            ignore_index=self.ignore_index,
+            size_average=self.size_average,
+        )
         if self.cuda:
             criterion = criterion.cuda()
 
@@ -32,10 +53,25 @@ class SegmentationLosses(object):
 
         return loss
 
+    def CrossEntropyLaneLoss(self, logit, target):
+        n, c, h, w = logit.size()
+
+        celoss = self.celoss(logit[:, 0:-1, :, :], target[0].long())
+        laneloss = self.mse(logit[:, -1:, :, :], target[1].long())
+
+        if self.batch_average:
+            celoss /= n
+
+        loss = celoss + laneloss
+        return loss
+
     def FocalLoss(self, logit, target, gamma=2, alpha=0.5):
         n, c, h, w = logit.size()
-        criterion = nn.CrossEntropyLoss(weight=self.weight, ignore_index=self.ignore_index,
-                                        size_average=self.size_average)
+        criterion = nn.CrossEntropyLoss(
+            weight=self.weight,
+            ignore_index=self.ignore_index,
+            size_average=self.size_average,
+        )
         if self.cuda:
             criterion = criterion.cuda()
 
@@ -50,6 +86,7 @@ class SegmentationLosses(object):
 
         return loss
 
+
 if __name__ == "__main__":
     loss = SegmentationLosses(cuda=True)
     a = torch.rand(1, 3, 7, 7).cuda()
@@ -57,7 +94,3 @@ if __name__ == "__main__":
     print(loss.CrossEntropyLoss(a, b).item())
     print(loss.FocalLoss(a, b, gamma=0, alpha=None).item())
     print(loss.FocalLoss(a, b, gamma=2, alpha=0.5).item())
-
-
-
-
