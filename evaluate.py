@@ -206,10 +206,10 @@ class Trainer(object):
         mIoU = self.evaluator.Mean_Intersection_over_Union()
         FWIoU = self.evaluator.Frequency_Weighted_Intersection_over_Union()
         print("Validation:")
-        print(
-            "[Epoch: %d, numImages: %5d]"
-            % (epoch, i * self.args.batch_size + image.data.shape[0])
-        )
+        # print(
+        #     "[Epoch: %d, numImages: %5d]"
+        #     % (epoch, i * self.args.batch_size + image.data.shape[0])
+        # )
         print(
             "Acc:{}, Acc_class:{}, mIoU:{}, fwIoU: {}".format(
                 Acc, Acc_class, mIoU, FWIoU

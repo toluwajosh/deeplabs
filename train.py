@@ -330,7 +330,7 @@ def main():
     parser.add_argument(
         "--dataset",
         type=str,
-        default="pascal",
+        default="bdd",
         # choices=['pascal', 'coco', 'cityscapes', 'bdd'],
         help="dataset name (default: pascal)",
     )
