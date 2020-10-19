@@ -110,11 +110,13 @@ class RandomGaussianBlur(object):
         img = sample["image"]
         if random.random() < 0.5:
             img = img.filter(ImageFilter.GaussianBlur(radius=random.random()))
-
+        return_dict = {"image": img, "name": sample["name"]}
         if "label" in sample:
-            return {"image": img, "label": sample["label"], "name": sample["name"]}
+            return_dict.update({"label": sample["label"]})
+        if "lanes" in sample:
+            return_dict.update({"lanes": sample["lanes"]})
 
-        return {"image": img, "name": sample["name"]}
+        return return_dict
 
 
 class RandomScaleCrop(object):
@@ -247,14 +249,20 @@ class Rescale(object):
         assert img.size == mask.size
 
         shape = (int(img.size[0] * self.ratio), int(img.size[1] * self.ratio))
-        # print(img.size, shape)
 
         img = img.resize(shape, Image.BILINEAR)
+
+        return_dict = {"image": img, "name": sample["name"]}
         if "label" in sample:
             mask = sample["label"]
             mask = mask.resize(shape, Image.NEAREST)
-            return {"image": img, "label": mask, "name": sample["name"]}
-        return {"image": img, "name": sample["name"]}
+            # return {"image": img, "label": mask, "name": sample["name"]}
+            return_dict.update({"label": mask})
+        if "lanes" in sample:
+            lanes = sample["lanes"]
+            lanes = lanes.resize(shape, Image.NEAREST)
+            return_dict.update({"lanes", lanes})
+        return return_dict
 
 
 class FixedResize(object):
