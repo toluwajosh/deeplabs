@@ -83,20 +83,10 @@ class Trainer(object):
             exit()
 
         # Define network
-        if self.args.model == "deeplabv3+":
-            model = DeepLab(
-                args=self.args, num_classes=self.nclass, freeze_bn=args.freeze_bn
-            )
-        elif self.args.model == "deeplabv3":
-            model = DeepLabv3(
-                Norm=self.args.norm,
-                backbone=args.backbone,
-                output_stride=args.out_stride,
-                num_classes=self.nclass,
-                freeze_bn=args.freeze_bn,
-            )
-        elif self.args.model == "fpn":
-            model = FPN(args=args, num_classes=self.nclass)
+        # Todo: add option for other networks
+        model = DeepLab(
+            args=self.args, num_classes=self.nclass, freeze_bn=args.freeze_bn
+        )
         """
         model.cuda()
         summary(model, input_size=(3, 720, 1280))
@@ -361,8 +351,8 @@ def main():
     parser.add_argument(
         "--loss-type",
         type=str,
-        default="ce",
-        choices=["ce", "focal"],
+        default="ce+lane",
+        choices=["ce+lane"],
         help="loss func type (default: ce)",
     )
     # model
