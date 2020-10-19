@@ -1,5 +1,14 @@
 # Deeplabv3+ BDD100k/drivable_area implementation
 
+Todos:
+
+- [ ] Change prints to logger
+- [ ] Add lane line detection
+
+See original readme below
+
+---
+
 [![Results](./images/result.png)](https://www.youtube.com/watch?v=-dzS8VlVmk4&list=PLn3JZxvQvVuAbhz5ep4X-dysT9jLMMQpv)
 (Click image to see demo video)
 
