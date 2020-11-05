@@ -7,8 +7,6 @@ from tqdm import tqdm
 from mypath import Path
 from dataloaders import make_data_loader
 from modeling.sync_batchnorm.replicate import patch_replication_callback
-
-# TODO: remove all wildcards
 from modeling.deeplab import *
 from modeling.fpn import FPN
 from utils.loss import SegmentationLosses
@@ -17,8 +15,7 @@ from utils.lr_scheduler import LR_Scheduler
 from utils.saver import Saver
 from utils.summaries import TensorboardSummary
 from utils.metrics import Evaluator
-
-# from modules import nn as NN
+from utils.visualize import Visualize as Vs
 from torchsummary import summary
 
 
@@ -27,7 +24,7 @@ def gn(planes):
 
 
 def syncbn(planes):
-    return nn.BatchNorm2d(planes)
+    pass
 
 
 def bn(planes):
@@ -50,14 +47,7 @@ def abn(planes):
 class Trainer(object):
     def __init__(self, args):
         self.args = args
-
-        # Define Saver
-        self.saver = Saver(args)
-        self.saver.save_experiment_config()
-        # Define Tensorboard Summary
-        self.summary = TensorboardSummary(self.saver.experiment_dir)
-        if not args.test:
-            self.writer = self.summary.create_summary()
+        self.vs = Vs(args.dataset)
 
         # Define Dataloader
         kwargs = {"num_workers": args.workers, "pin_memory": True}
@@ -85,28 +75,7 @@ class Trainer(object):
             exit()
 
         # Define network
-        # Todo: add option for other networks
-        model = LaneDeepLab(
-            args=self.args, num_classes=self.nclass, freeze_bn=args.freeze_bn
-        )
-        """
-        model.cuda()
-        summary(model, input_size=(3, 720, 1280))
-        exit()
-        """
-
-        train_params = [
-            {"params": model.get_1x_lr_params(), "lr": args.lr},
-            {"params": model.get_10x_lr_params(), "lr": args.lr * 10},
-        ]
-
-        # Define Optimizer
-        optimizer = torch.optim.SGD(
-            train_params,
-            momentum=args.momentum,
-            weight_decay=args.weight_decay,
-            nesterov=args.nesterov,
-        )
+        model = LaneDeepLab(args=args, num_classes=self.nclass)
 
         # Define Criterion
         # whether to use class balanced weights
@@ -126,14 +95,10 @@ class Trainer(object):
         self.criterion = SegmentationLosses(weight=weight, cuda=args.cuda).build_loss(
             mode=args.loss_type
         )
-        self.model, self.optimizer = model, optimizer
+        self.model = model
 
         # Define Evaluator
         self.evaluator = Evaluator(self.nclass)
-        # Define lr scheduler
-        self.scheduler = LR_Scheduler(
-            args.lr_scheduler, args.lr, args.epochs, len(self.train_loader)
-        )
 
         # Using cuda
         if args.cuda:
@@ -147,172 +112,107 @@ class Trainer(object):
             if not os.path.isfile(args.resume):
                 raise RuntimeError("=> no checkpoint found at '{}'".format(args.resume))
             checkpoint = torch.load(args.resume)
-            if args.ft:
-                args.start_epoch = 0
-            else:
-                args.start_epoch = checkpoint["epoch"]
-
+            args.start_epoch = checkpoint["epoch"]
             if args.cuda:
-                # self.model.module.load_state_dict(checkpoint['state_dict'])
-                pretrained_dict = checkpoint["state_dict"]
-                model_dict = {}
-                state_dict = self.model.module.state_dict()
-                for k, v in pretrained_dict.items():
-                    if k in state_dict:
-                        model_dict[k] = v
-                state_dict.update(model_dict)
-                self.model.module.load_state_dict(state_dict)
+                self.model.module.load_state_dict(checkpoint["state_dict"])
             else:
-                # self.model.load_state_dict(checkpoint['state_dict'])
-                pretrained_dict = checkpoint["state_dict"]
-                model_dict = {}
-                state_dict = self.model.state_dict()
-                for k, v in pretrained_dict.items():
-                    if k in state_dict:
-                        model_dict[k] = v
-                state_dict.update(model_dict)
-                self.model.load_state_dict(state_dict)
-            if not args.ft:
-                self.optimizer.load_state_dict(checkpoint["optimizer"])
+                self.model.load_state_dict(checkpoint["state_dict"])
             self.best_pred = checkpoint["best_pred"]
             print(
                 "=> loaded checkpoint '{}' (epoch {})".format(
                     args.resume, checkpoint["epoch"]
                 )
             )
-        elif args.decoder is not None:
-            if not os.path.isfile(args.decoder):
-                raise RuntimeError(
-                    "=> no checkpoint for decoder found at '{}'".format(args.decoder)
-                )
-            checkpoint = torch.load(args.decoder)
-            args.start_epoch = (
-                0  # As every time loads decoder only should be finetuning
-            )
-            if args.cuda:
-                decoder_dict = checkpoint["state_dict"]
-                model_dict = {}
-                state_dict = self.model.module.state_dict()
-                for k, v in decoder_dict.items():
-                    if not "aspp" in k:
-                        continue
-                    if k in state_dict:
-                        model_dict[k] = v
-                state_dict.update(model_dict)
-                self.model.module.load_state_dict(state_dict)
-            else:
-                raise NotImplementedError("Please USE CUDA!!!")
 
         # Clear start epoch if fine-tuning
         if args.ft:
             args.start_epoch = 0
 
-    def training(self, epoch):
-        train_loss = 0.0
-        self.model.train()
-        tbar = tqdm(self.train_loader)
-        num_img_tr = len(self.train_loader)
+    def test(self):
+        self.model.eval()
+        self.args.examine = False
+        tbar = tqdm(self.test_loader, desc="\r")
+        if self.args.color:
+            __image = True
+        else:
+            __image = False
         for i, sample in enumerate(tbar):
-            image, target = sample["image"], sample["label"]
-            lanes = sample["lanes"]
+            images = sample["image"]
+            names = sample["name"]
             if self.args.cuda:
-                image, target = image.cuda(), target.cuda()
-                lanes = lanes.cuda().unsqueeze(1)
-            self.scheduler(self.optimizer, i, epoch, self.best_pred)
-            self.optimizer.zero_grad()
-            output = self.model(image)
-            loss = self.criterion(output, (target, lanes))
-            loss.backward()
-            self.optimizer.step()
-            train_loss += loss.item()
-            tbar.set_description("Train loss: %.3f" % (train_loss / (i + 1)))
-            continue
-            # self.writer.add_scalar('train/total_loss_iter', loss.item(), i + num_img_tr * epoch)
+                images = images.cuda()
+            with torch.no_grad():
+                output = self.model(images)
+            preds = output.data.cpu().numpy()
+            preds = np.argmax(preds, axis=1)
+            if __image:
+                images = images.cpu().numpy()
+            if not self.args.color:
+                self.vs.predict_id(preds, names, self.args.save_dir)
+            else:
+                self.vs.predict_color(preds, images, names, self.args.save_dir)
 
-            # Show 10 * 3 inference results each epoch
-            """
-            if i % (num_img_tr // 10) == 0 and False:
-                global_step = i + num_img_tr * epoch
-                self.summary.visualize_image(self.writer, self.args.dataset, image, target, output, global_step)
-            """
-
-        self.writer.add_scalar("train/total_loss_epoch", train_loss, epoch)
-        print(
-            "[Epoch: %d, numImages: %5d]"
-            % (epoch, i * self.args.batch_size + image.data.shape[0])
-        )
-        print("Loss: %.3f" % train_loss)
-
-        if self.args.no_val:
-            # save checkpoint every epoch
-            is_best = False
-            self.saver.save_checkpoint(
-                {
-                    "epoch": epoch + 1,
-                    "state_dict": self.model.module.state_dict(),
-                    "optimizer": self.optimizer.state_dict(),
-                    "best_pred": self.best_pred,
-                },
-                is_best,
-            )
-
-    def validation(self, epoch, inference=False):
+    def validation(self, epoch):
         self.model.eval()
         self.evaluator.reset()
         tbar = tqdm(self.val_loader, desc="\r")
         test_loss = 0.0
+        if self.args.color or self.args.examine:
+            __image = True
+        else:
+            __image = False
         for i, sample in enumerate(tbar):
-            image, target = sample["image"], sample["label"]
+            images, targets = sample["image"], sample["label"]
+            names = sample["name"]
             lanes = sample["lanes"]
             if self.args.cuda:
-                image, target = image.cuda(), target.cuda()
+                images, targets = images.cuda(), targets.cuda()
                 lanes = lanes.cuda().unsqueeze(1)
             with torch.no_grad():
-                output = self.model(image)
-            loss = self.criterion(output, (target, lanes))
+                output = self.model(images)
+            # debug:
+            # print("output.shape: ", output.shape)
+            # print("targets.shape: ", targets.shape)
+            loss = self.criterion(output, (targets, lanes))
             test_loss += loss.item()
             tbar.set_description("Test loss: %.3f" % (test_loss / (i + 1)))
-            pred = output[:, :-1, :, :].data.cpu().numpy()
-            target = target.cpu().numpy()
-            pred = np.argmax(pred, axis=1)
+            preds = output.data.cpu().numpy()
+            targets = targets.cpu().numpy()
+            preds = np.argmax(
+                preds[:, 0:-1, :, :], axis=1
+            )  # since the last channel is lane lines
             # Add batch sample into evaluator
-            self.evaluator.add_batch(target, pred)
+            # debug:
+            # print("targets.shape: ", targets.shape)
+            # print("preds.shape: ", preds.shape)
+            self.evaluator.add_batch(targets, preds)  # originla
+            if __image:
+                images = images.cpu().numpy()
+            if self.args.id:
+                self.vs.predict_id(preds, names, self.args.save_dir)
+            if self.args.color:
+                self.vs.predict_color(preds, images, names, self.args.save_dir)
+            if self.args.examine:
+                self.vs.predict_examine(
+                    preds, targets, images, names, self.args.save_dir
+                )
 
         # Fast test during the training
         Acc = self.evaluator.Pixel_Accuracy()
         Acc_class = self.evaluator.Pixel_Accuracy_Class()
         mIoU = self.evaluator.Mean_Intersection_over_Union()
         FWIoU = self.evaluator.Frequency_Weighted_Intersection_over_Union()
-        self.writer.add_scalar("val/total_loss_epoch", test_loss, epoch)
-        self.writer.add_scalar("val/mIoU", mIoU, epoch)
-        self.writer.add_scalar("val/Acc", Acc, epoch)
-        self.writer.add_scalar("val/Acc_class", Acc_class, epoch)
-        self.writer.add_scalar("val/fwIoU", FWIoU, epoch)
         print("Validation:")
-        print(
-            "[Epoch: %d, numImages: %5d]"
-            % (epoch, i * self.args.batch_size + image.data.shape[0])
-        )
+        # print(
+        #     "[Epoch: %d, numImages: %5d]"
+        #     % (epoch, i * self.args.batch_size + image.data.shape[0])
+        # )
         print(
             "Acc:{}, Acc_class:{}, mIoU:{}, fwIoU: {}".format(
                 Acc, Acc_class, mIoU, FWIoU
             )
         )
         print("Loss: %.3f" % test_loss)
-
-        new_pred = mIoU
-        if new_pred > self.best_pred:
-            is_best = True
-            self.best_pred = new_pred
-            self.saver.save_checkpoint(
-                {
-                    "epoch": epoch + 1,
-                    "state_dict": self.model.module.state_dict(),
-                    "optimizer": self.optimizer.state_dict(),
-                    "best_pred": self.best_pred,
-                },
-                is_best,
-            )
 
 
 def main():
@@ -327,7 +227,7 @@ def main():
         "--dataset",
         type=str,
         default="bdd",
-        choices=["pascal", "coco", "cityscapes", "bdd"],
+        # choices=['pascal', 'coco', 'cityscapes', 'bdd'],
         help="dataset name (default: pascal)",
     )
     parser.add_argument(
@@ -341,11 +241,10 @@ def main():
     )
     parser.add_argument("--base-size", type=int, default=512, help="base image size")
     parser.add_argument("--crop-size", type=int, default=512, help="crop image size")
-    parser.add_argument("--ratio", type=float, default=1.0)
     parser.add_argument(
         "--sync-bn",
+        type=bool,
         default=False,
-        action="store_true",
         help="whether to use sync bn (default: auto)",
     )
     parser.add_argument(
@@ -373,25 +272,11 @@ def main():
         "--norm",
         type=str,
         default="gn",
-        choices=["gn", "bn", "abn", "ign"],
+        choices=["gn", "bn", "abn"],
         help="normalization methods",
     )
 
     # training hyper params
-    parser.add_argument(
-        "--epochs",
-        type=int,
-        default=None,
-        metavar="N",
-        help="number of epochs to train (default: auto)",
-    )
-    parser.add_argument(
-        "--start_epoch",
-        type=int,
-        default=0,
-        metavar="N",
-        help="start epochs (default:0)",
-    )
     parser.add_argument(
         "--batch-size",
         type=int,
@@ -471,12 +356,6 @@ def main():
         help="put the path to resuming file if needed",
     )
     parser.add_argument(
-        "--decoder",
-        type=str,
-        default=None,
-        help="put the path to resuming file if needed",
-    )
-    parser.add_argument(
         "--checkname", type=str, default=None, help="set the checkpoint name"
     )
     # finetuning pre-trained models
@@ -487,6 +366,10 @@ def main():
         help="finetuning on a different dataset",
     )
     # evaluation option
+    parser.add_argument("--labels", type=str, default=None)
+    parser.add_argument(
+        "--test", action="store_true", default=False, help="if true, inference test set"
+    )
     parser.add_argument(
         "--eval-interval", type=int, default=1, help="evaluuation interval (default: 1)"
     )
@@ -496,19 +379,22 @@ def main():
         default=False,
         help="skip validation during training",
     )
-
-    # test option
     parser.add_argument(
-        "--test",
+        "--save-dir", type=str, default="./prd", help="visualized image save directory"
+    )
+    parser.add_argument(
+        "--id", action="store_true", default=False, help="save id images"
+    )
+    parser.add_argument(
+        "--color", action="store_true", default=False, help="save visualized images"
+    )
+    parser.add_argument(
+        "--examine",
         action="store_true",
         default=False,
-        help="do not generate exp, nor train.",
+        help="save visualized examine images",
     )
 
-    # additional option
-    parser.add_argument("--labels", type=str, default=None)
-
-    # TODO: make arguments into config file
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
     if args.cuda:
@@ -525,50 +411,21 @@ def main():
         else:
             args.sync_bn = False
 
-    # default settings for epochs, batch_size and lr
-    if args.epochs is None:
-        epoches = {
-            "coco": 30,
-            "cityscapes": 200,
-            "pascal": 50,
-            "pascal_toy": 50,
-            "bdd_toy": 30,
-            "bdd": 30,
-        }
-        args.epochs = epoches[args.dataset.lower()]
-
     if args.batch_size is None:
         args.batch_size = 4 * len(args.gpu_ids)
 
     if args.test_batch_size is None:
-        args.test_batch_size = args.batch_size
-
-    if args.lr is None:
-        lrs = {
-            "coco": 0.1,
-            "cityscapes": 0.01,
-            "pascal": 0.007,
-            "pascal_toy": 0.007,
-            "bdd_toy": 0.001,
-            "bdd": 0.001,
-        }
-        args.lr = lrs[args.dataset.lower()] / 16 * args.batch_size
+        args.test_batch_size = 1
 
     if args.checkname is None:
-        args.checkname = args.model + "-" + str(args.backbone)
+        args.checkname = "deeplab-" + str(args.backbone)
     print(args)
     torch.manual_seed(args.seed)
     trainer = Trainer(args)
-    print("Starting Epoch:", trainer.args.start_epoch)
-    print("Total Epoches:", trainer.args.epochs)
-    for epoch in range(trainer.args.start_epoch, trainer.args.epochs):
-        trainer.training(epoch)
-        if not trainer.args.no_val and epoch % args.eval_interval == (
-            args.eval_interval - 1
-        ):
-            trainer.validation(epoch)
-
-    trainer.writer.close()
+    if args.test:
+        trainer.test()
+    else:
+        trainer.validation(0)
 
 
 if __name__ == "__main__":

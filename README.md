@@ -1,11 +1,23 @@
 # Deeplabv3+ BDD100k/drivable_area implementation
 
-Todos:
+See the original readme in the later sections
 
-- [ ] Change prints to logger
-- [ ] Add lane line detection
+## Additions in this Fork
 
-See original readme below
+- Add lane detection on BDD100k dataset
+
+## Simple Commands for running scripts
+
+Make sure to edit the mypath.py file to include the correct path the dataset
+
+- Run Training:
+  - `python lane_train.py --gpu-ids 0,1,2,3`
+- Run Training, with continuation of a previous session:
+  - `python lane_train.py --gpu-ids 0,1,2,3 --epochs 50 --resume run/bdd/deeplabv3+-resnet/experiment_1/checkpoint.pth.tar `
+- Run evaluation: 
+  - `python evaluate.py --resume run/bdd/deeplabv3+-resnet/model_best.pth.tar --examine`
+
+
 
 ---
 

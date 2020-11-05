@@ -1,4 +1,5 @@
 import os
+from copy import deepcopy
 import numpy as np
 import scipy.misc as m
 from PIL import Image
@@ -15,7 +16,7 @@ class BDD100kSegmentation(data.Dataset):
 
     NUM_CLASSES = 3
 
-    def __init__(self, args, root=Path.db_root_dir("bdd"), split="train"):
+    def __init__(self, args, root=Path.db_root_dir("bdd"), split="train", division=10):
 
         self.root = root
         self.split = split
@@ -29,17 +30,28 @@ class BDD100kSegmentation(data.Dataset):
         )
         self.lanes_base = os.path.join(self.root, "lanes", "100k", self.split)
 
-        self.files[split] = self.recursive_glob(rootdir=self.images_base, suffix=".jpg")
         self.lane_files[split] = self.recursive_glob(
             rootdir=self.lanes_base, suffix=".png"
         )
 
+        # to make sure all files in lanes are in images
+        # self.files[split] = self.recursive_glob(rootdir=self.images_base, suffix=".jpg")
+        self.files[split] = deepcopy(self.lane_files[split])
+        self.files[split] = [
+            x.replace("lanes/100k", "images/100k") for x in self.files[split]
+        ]
+        self.files[split] = [x.replace(".png", ".jpg") for x in self.files[split]]
+
         # REDUCING DATASET
         if split != "test":
-            self.files[split] = self.files[split][: len(self.files[split]) // 10]
+            self.files[split] = self.files[split][: len(self.files[split]) // division]
             self.lane_files[split] = self.lane_files[split][
-                : len(self.lane_files[split]) // 10
+                : len(self.lane_files[split]) // division
             ]
+        else:
+            self.files[split] = self.recursive_glob(
+                rootdir=self.images_base, suffix=".jpg"
+            )
 
         self.void_classes = (
             []
@@ -62,8 +74,9 @@ class BDD100kSegmentation(data.Dataset):
             raise Exception(
                 "No files for split=[%s] found in %s" % (split, self.images_base)
             )
-
         print("Found %d %s images" % (len(self.files[split]), split))
+        # print("Found %d %s images" % (len(self.lane_files[split]), split))
+        # exit(0)
 
     def __len__(self):
         return len(self.files[self.split])
